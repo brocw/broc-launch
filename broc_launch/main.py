@@ -4,6 +4,7 @@ from gi.repository import Gtk, Gio
 
 from .popup import PopupWindow
 from .tray import setup_tray
+from .hotkey import setup_hotkey
 
 
 class LoftApp(Gtk.Application):
@@ -11,6 +12,7 @@ class LoftApp(Gtk.Application):
         super().__init__(application_id="io.github.broc_launch")
         self._popup = None
         self._tray = None
+        self._hotkey = None
 
         quit_action = Gio.SimpleAction.new("quit", None)
         quit_action.connect("activate", lambda *_: self.quit())
@@ -24,6 +26,9 @@ class LoftApp(Gtk.Application):
                 on_activate=self._popup.toggle,
                 on_quit=self.quit,
             )
+            # setup_tray initialises the GLib D-Bus main loop; hotkey setup
+            # must happen after it so the session bus uses the GLib loop.
+            self._hotkey = setup_hotkey(on_activate=self._popup.toggle)
         self._popup.present_popup()
 
     def do_startup(self):
