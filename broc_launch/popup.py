@@ -11,8 +11,8 @@ LLM_URL = "https://claude.ai/new?q={query}"
 
 CSS_PATH = Path(__file__).parent / "assets" / "style.css"
 
-ICON_SEARCH = "🔍"
-ICON_LLM = "✦"
+ICON_SEARCH = "🌐"
+ICON_LLM = "🧠"
 
 
 class PopupWindow(Gtk.ApplicationWindow):
