@@ -2,6 +2,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, Gio
 
+from .config import load as load_config
 from .popup import PopupWindow
 from .tray import setup_tray
 from .hotkey import setup_hotkey
@@ -10,6 +11,7 @@ from .hotkey import setup_hotkey
 class LoftApp(Gtk.Application):
     def __init__(self):
         super().__init__(application_id="io.github.broc_launch")
+        self._config = load_config()
         self._popup = None
         self._tray = None
         self._hotkey = None
@@ -18,18 +20,31 @@ class LoftApp(Gtk.Application):
         quit_action.connect("activate", lambda *_: self.quit())
         self.add_action(quit_action)
 
+    def _toggle(self):
+        if self._popup.get_visible():
+            self._popup.toggle()
+            return
+        cfg = load_config()
+        self._popup.apply_config(cfg)
+        if self._hotkey:
+            self._hotkey.rebind(cfg.hotkey.binding)
+        self._popup.present_popup()
+
     def do_activate(self):
         if self._popup is None:
-            self._popup = PopupWindow(self)
+            self._popup = PopupWindow(self, self._config)
             self._tray = setup_tray(
                 app=self,
-                on_activate=self._popup.toggle,
+                on_activate=self._toggle,
                 on_quit=self.quit,
             )
             # setup_tray initialises the GLib D-Bus main loop; hotkey setup
             # must happen after it so the session bus uses the GLib loop.
-            self._hotkey = setup_hotkey(on_activate=self._popup.toggle)
-        self._popup.present_popup()
+            self._hotkey = setup_hotkey(
+                on_activate=self._toggle,
+                trigger=self._config.hotkey.binding,
+            )
+        self._toggle()
 
     def do_startup(self):
         Gtk.Application.do_startup(self)

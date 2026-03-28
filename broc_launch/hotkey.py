@@ -124,6 +124,13 @@ class HotkeyManager:
     # Hotkey fired                                                         #
     # ------------------------------------------------------------------ #
 
+    def rebind(self, trigger):
+        """Update the preferred trigger and re-register with the portal."""
+        if trigger == self._trigger or self._session_handle is None:
+            return
+        self._trigger = trigger
+        self._bind_shortcuts()
+
     def _on_activated(self, session_handle, shortcut_id, timestamp, options):
         if (str(session_handle) == self._session_handle
                 and str(shortcut_id) == SHORTCUT_ID):

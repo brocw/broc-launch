@@ -6,9 +6,6 @@ import subprocess
 import urllib.parse
 from pathlib import Path
 
-GOOGLE_URL = "https://www.google.com/search?q={query}"
-LLM_URL = "https://claude.ai/new?q={query}"
-
 CSS_PATH = Path(__file__).parent / "assets" / "style.css"
 
 ICON_SEARCH = "🌐"
@@ -16,8 +13,14 @@ ICON_LLM = "🧠"
 
 
 class PopupWindow(Gtk.ApplicationWindow):
-    def __init__(self, app):
+    def __init__(self, app, config):
         super().__init__(application=app)
+
+        self._search_url = config.search.search_url
+        self._llm_url = config.search.llm_url
+        self._search_name = config.search.search_name
+        self._llm_name = config.search.llm_name
+        self._width = config.window.width
 
         self._shift_held = False
 
@@ -34,7 +37,7 @@ class PopupWindow(Gtk.ApplicationWindow):
         Gtk4LayerShell.set_namespace(self, "broc-launch")
 
         self.set_decorated(False)
-        self.set_size_request(700, -1)
+        self.set_size_request(self._width, -1)
         self.set_resizable(False)
 
     def _build_ui(self):
@@ -65,7 +68,7 @@ class PopupWindow(Gtk.ApplicationWindow):
         input_row.append(self._entry)
 
         # Hint text
-        self._hint = Gtk.Label(label="Enter → Google  ·  ⇧Enter → Claude")
+        self._hint = Gtk.Label(label=f"Enter → {self._search_name}  ·  ⇧Enter → {self._llm_name}")
         self._hint.add_css_class("hint")
         self._hint.set_halign(Gtk.Align.START)
         frame.append(self._hint)
@@ -107,9 +110,9 @@ class PopupWindow(Gtk.ApplicationWindow):
             query = self._entry.get_text().strip()
             if query:
                 if state & Gdk.ModifierType.SHIFT_MASK:
-                    self._dispatch(LLM_URL, query)
+                    self._dispatch(self._llm_url, query)
                 else:
-                    self._dispatch(GOOGLE_URL, query)
+                    self._dispatch(self._search_url, query)
             self._dismiss()
             return True
 
@@ -137,6 +140,16 @@ class PopupWindow(Gtk.ApplicationWindow):
         self._icon.set_label(ICON_SEARCH)
         self._shift_held = False
         self.hide()
+
+    def apply_config(self, cfg):
+        self._search_url = cfg.search.search_url
+        self._llm_url = cfg.search.llm_url
+        self._search_name = cfg.search.search_name
+        self._llm_name = cfg.search.llm_name
+        self._width = cfg.window.width
+        self.set_size_request(self._width, -1)
+        self.queue_resize()
+        self._hint.set_label(f"Enter → {self._search_name}  ·  ⇧Enter → {self._llm_name}")
 
     def present_popup(self):
         self.present()
