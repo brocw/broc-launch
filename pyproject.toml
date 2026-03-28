@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "broc-launch"
+version = "0.1.0"
+requires-python = ">=3.12"
+
+[project.scripts]
+broc-launch = "broc_launch.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.setuptools.package-data]
+"broc_launch.assets" = ["*.css", "*.svg"]
