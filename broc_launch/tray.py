@@ -1,6 +1,9 @@
 """
 StatusNotifierItem (SNI) tray icon implemented directly over D-Bus.
 Avoids the GTK3/GTK4 version conflict that AyatanaAppIndicator3 would cause.
+
+Right-click context menu uses com.canonical.dbusmenu so KDE Plasma renders
+it natively instead of spawning a separate GTK/Wayland window.
 """
 import os
 import dbus
@@ -12,8 +15,118 @@ SNI_IFACE = "org.kde.StatusNotifierItem"
 WATCHER_SERVICE = "org.kde.StatusNotifierWatcher"
 WATCHER_PATH = "/StatusNotifierWatcher"
 WATCHER_IFACE = "org.kde.StatusNotifierWatcher"
+DBUSMENU_IFACE = "com.canonical.dbusmenu"
 
 ICON_PATH = str(Path(__file__).parent / "assets" / "broc-launch.svg")
+MENU_PATH = "/StatusNotifierItem/Menu"
+
+# Menu item IDs
+_ID_HEADER = 1
+_ID_SEP    = 2
+_ID_QUIT   = 3
+
+
+class DBusMenu(dbus.service.Object):
+    """Minimal com.canonical.dbusmenu implementation for the tray context menu.
+
+    Menu structure:
+      broc-launch  (disabled label)
+      ─────────────
+      Quit
+    """
+
+    def __init__(self, bus_name, on_quit):
+        super().__init__(bus_name, MENU_PATH)
+        self._on_quit = on_quit
+        self._revision = 1
+
+    # ------------------------------------------------------------------ #
+    # Helpers                                                              #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _item(id, props):
+        """Return a menu item tuple (id, props_dict, children_array)."""
+        return (
+            dbus.Int32(id),
+            dbus.Dictionary(props, signature="sv"),
+            dbus.Array([], signature="v"),
+        )
+
+    def _layout(self):
+        """Return the full menu tree as required by GetLayout."""
+        children = dbus.Array([
+            dbus.Struct(
+                self._item(_ID_HEADER, {
+                    "label":   dbus.String("broc-launch", variant_level=1),
+                    "enabled": dbus.Boolean(False, variant_level=1),
+                }),
+                signature=None,
+                variant_level=1,
+            ),
+            dbus.Struct(
+                self._item(_ID_SEP, {
+                    "type": dbus.String("separator", variant_level=1),
+                }),
+                signature=None,
+                variant_level=1,
+            ),
+            dbus.Struct(
+                self._item(_ID_QUIT, {
+                    "label": dbus.String("Quit", variant_level=1),
+                }),
+                signature=None,
+                variant_level=1,
+            ),
+        ], signature="v")
+
+        root = (
+            dbus.Int32(0),
+            dbus.Dictionary({}, signature="sv"),
+            children,
+        )
+        return root
+
+    # ------------------------------------------------------------------ #
+    # com.canonical.dbusmenu methods                                      #
+    # ------------------------------------------------------------------ #
+
+    @dbus.service.method(DBUSMENU_IFACE, in_signature="iias", out_signature="u(ia{sv}av)")
+    def GetLayout(self, parent_id, recursion_depth, property_names):
+        return (dbus.UInt32(self._revision), self._layout())
+
+    @dbus.service.method(DBUSMENU_IFACE, in_signature="aias", out_signature="a(ia{sv})")
+    def GetGroupProperties(self, ids, property_names):
+        return dbus.Array([], signature="(ia{sv})")
+
+    @dbus.service.method(DBUSMENU_IFACE, in_signature="isvu")
+    def Event(self, id, event_id, data, timestamp):
+        if event_id == "clicked" and int(id) == _ID_QUIT:
+            self._on_quit()
+
+    @dbus.service.method(DBUSMENU_IFACE, in_signature="a(isvu)", out_signature="ai")
+    def EventGroup(self, events):
+        for id, event_id, data, timestamp in events:
+            self.Event(id, event_id, data, timestamp)
+        return dbus.Array([], signature="i")
+
+    @dbus.service.method(DBUSMENU_IFACE, in_signature="i", out_signature="b")
+    def AboutToShow(self, id):
+        return dbus.Boolean(False)
+
+    @dbus.service.method(DBUSMENU_IFACE, in_signature="ai", out_signature="aiai")
+    def AboutToShowGroup(self, ids):
+        return (dbus.Array([], signature="i"), dbus.Array([], signature="i"))
+
+    # ------------------------------------------------------------------ #
+    # com.canonical.dbusmenu signals                                      #
+    # ------------------------------------------------------------------ #
+
+    @dbus.service.signal(DBUSMENU_IFACE, signature="ui")
+    def LayoutUpdated(self, revision, parent): pass
+
+    @dbus.service.signal(DBUSMENU_IFACE, signature="a(ia{sv})a(ias)")
+    def ItemsPropertiesUpdated(self, updated_props, removed_props): pass
 
 
 class StatusNotifierItem(dbus.service.Object):
@@ -25,6 +138,9 @@ class StatusNotifierItem(dbus.service.Object):
         service_name = f"org.kde.StatusNotifierItem-{os.getpid()}-1"
         bus_name = dbus.service.BusName(service_name, bus)
         super().__init__(bus_name, "/StatusNotifierItem")
+
+        # Create the dbusmenu object on the same bus name so KDE can reach it.
+        self._menu = DBusMenu(bus_name, on_quit)
 
         self._register_with_watcher(bus, service_name)
 
@@ -56,7 +172,7 @@ class StatusNotifierItem(dbus.service.Object):
             "Status":       dbus.String("Active"),
             "IconName":     dbus.String("search"),  # freedesktop icon name
             "IconThemePath":dbus.String(""),
-            "Menu":         dbus.ObjectPath("/NO_DBUSMENU"),
+            "Menu":         dbus.ObjectPath(MENU_PATH),
             "ItemIsMenu":   dbus.Boolean(False),
             "ToolTip":      dbus.Struct(
                 ("", dbus.Array([], signature="(iiay)"), "broc-launch", "Quick search popup"),
@@ -81,50 +197,9 @@ class StatusNotifierItem(dbus.service.Object):
 
     @dbus.service.method(SNI_IFACE, in_signature="ii")
     def ContextMenu(self, x, y):
-        """Right-click: show a minimal native menu via GTK4."""
-        self._show_context_menu()
-
-    def _show_context_menu(self):
-        import gi
-        gi.require_version("Gtk", "4.0")
-        from gi.repository import Gtk
-
-        win = Gtk.ApplicationWindow(application=self._app)
-        win.set_decorated(False)
-        win.set_resizable(False)
-
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        box.set_margin_top(4)
-        box.set_margin_bottom(4)
-
-        # Disabled header label
-        header = Gtk.Label(label="broc-launch")
-        header.set_sensitive(False)
-        header.set_margin_start(12)
-        header.set_margin_end(12)
-        header.set_margin_top(4)
-        header.set_margin_bottom(4)
-        header.set_halign(Gtk.Align.START)
-        box.append(header)
-
-        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-        box.append(sep)
-
-        quit_btn = Gtk.Button(label="Quit")
-        quit_btn.set_has_frame(False)
-        quit_btn.set_margin_start(4)
-        quit_btn.set_margin_end(4)
-        quit_btn.set_margin_top(2)
-        quit_btn.set_margin_bottom(2)
-        quit_btn.connect("clicked", lambda _: (win.close(), self._on_quit()))
-        box.append(quit_btn)
-
-        win.set_child(box)
-
-        # Close when focus is lost
-        win.connect("notify::is-active", lambda w, _: w.close() if not w.props.is_active else None)
-
-        win.present()
+        # KDE Plasma renders the menu natively via dbusmenu (Menu property).
+        # This method is intentionally a no-op.
+        pass
 
     # --- SNI signals ---
 
