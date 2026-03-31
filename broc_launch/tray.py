@@ -129,11 +129,32 @@ class DBusMenu(dbus.service.Object):
     def ItemsPropertiesUpdated(self, updated_props, removed_props): pass
 
 
+def _load_icon_pixmap(path, size=22):
+    """Rasterise the SVG and return SNI IconPixmap data: [(width, height, ARGB32 bytes)]."""
+    try:
+        from gi.repository import GdkPixbuf
+        pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_size(path, size, size)
+        pixels = bytearray(pixbuf.get_pixels())
+        n = pixbuf.get_n_channels()
+        w, h = pixbuf.get_width(), pixbuf.get_height()
+        argb = bytearray(w * h * 4)
+        for i in range(w * h):
+            argb[i*4 + 0] = pixels[i*n + 3] if n == 4 else 255  # A
+            argb[i*4 + 1] = pixels[i*n + 0]                      # R
+            argb[i*4 + 2] = pixels[i*n + 1]                      # G
+            argb[i*4 + 3] = pixels[i*n + 2]                      # B
+        return [(dbus.Int32(w), dbus.Int32(h), dbus.Array(argb, signature="y"))]
+    except Exception as e:
+        print(f"[broc-launch] Could not load icon pixmap: {e}")
+        return []
+
+
 class StatusNotifierItem(dbus.service.Object):
     def __init__(self, bus, app, on_activate, on_quit):
         self._app = app
         self._on_activate = on_activate
         self._on_quit = on_quit
+        self._icon_pixmap = _load_icon_pixmap(ICON_PATH)
 
         service_name = f"org.kde.StatusNotifierItem-{os.getpid()}-1"
         bus_name = dbus.service.BusName(service_name, bus)
@@ -170,8 +191,9 @@ class StatusNotifierItem(dbus.service.Object):
             "Id":           dbus.String("broc-launch"),
             "Title":        dbus.String("broc-launch"),
             "Status":       dbus.String("Active"),
-            "IconName":     dbus.String("search"),  # freedesktop icon name
+            "IconName":     dbus.String("search"),  # freedesktop fallback
             "IconThemePath":dbus.String(""),
+            "IconPixmap":   dbus.Array(self._icon_pixmap, signature="(iiay)"),
             "Menu":         dbus.ObjectPath(MENU_PATH),
             "ItemIsMenu":   dbus.Boolean(False),
             "ToolTip":      dbus.Struct(
