@@ -56,7 +56,7 @@ class HotkeyManager:
                 dbus_interface=SHORTCUTS_IFACE,
             )
         except dbus.DBusException as e:
-            print(f"[broc-launch] GlobalShortcuts.CreateSession failed: {e}")
+            print(f"[broc-launch] GlobalShortcuts not supported by this desktop, global hotkey unavailable: {e}")
             return
 
         req = self._bus.get_object(PORTAL_SERVICE, request_path)
